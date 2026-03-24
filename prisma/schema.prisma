@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      String   @default("analyst")
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scans   ScanResult[]
+  reports Report[]
+}
+
+model ScanResult {
+  id          String   @id @default(cuid())
+  targetUrl   String
+  scanType    String   @default("full")
+  status      String   @default("pending")
+  riskScore   Int      @default(0)
+  findings    String   @default("[]")
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model ThreatEvent {
+  id        String   @id @default(cuid())
+  type      String
+  severity  String
+  source    String
+  target    String
+  details   String
+  status    String   @default("active")
+  timestamp DateTime @default(now())
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  title       String
+  type        String   @default("assessment")
+  status      String   @default("draft")
+  severity    String   @default("medium")
+  summary     String
+  content     String   @default("")
+  findings    String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+}
