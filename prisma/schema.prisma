@@ -17,8 +17,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  scans   ScanResult[]
-  reports Report[]
+  scans         ScanResult[]
+  reports       Report[]
+  notifications Notification[]
 }
 
 model ScanResult {
@@ -58,4 +59,19 @@ model Report {
   updatedAt   DateTime @updatedAt
   userId      String
   user        User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // "threat", "scan_complete", "report_ready"
+  title     String
+  message   String
+  severity  String   @default("info") // "critical", "high", "medium", "low", "info"
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
 }

@@ -26,6 +26,9 @@ export default function ThreatFeed() {
       try {
         const threat: ThreatEvent = JSON.parse(event.data);
         setThreats((prev) => [threat, ...prev].slice(0, 50));
+
+        // Note: No toast notifications or sound alerts
+        // Threats are displayed in "Recent events" list only
       } catch (e) {
         console.error("Parse error:", e);
       }
