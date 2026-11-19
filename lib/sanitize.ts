@@ -14,20 +14,28 @@ export function sanitizeInput(input: string): string {
 /**
  * Validate and sanitize a URL input.
  */
-export function sanitizeUrl(url: string): string | null {
+export function sanitizeUrl(url: unknown): string | null {
   try {
+    if (typeof url !== "string" || url.length > 2048) return null;
     const parsed = new URL(url);
     if (!["http:", "https:"].includes(parsed.protocol)) {
       return null;
     }
-    // Prevent SSRF — block private IPs
-    const hostname = parsed.hostname;
+    // This only validates target syntax; a future live scanner must also validate DNS results.
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
     if (
+      parsed.username ||
+      parsed.password ||
+      !hostname.includes(".") ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      hostname.includes(":") ||
       hostname === "localhost" ||
       hostname === "127.0.0.1" ||
       hostname.startsWith("192.168.") ||
       hostname.startsWith("10.") ||
-      hostname.startsWith("172.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+      /^(127|0|169\.254|224|240)\./.test(hostname) ||
       hostname === "0.0.0.0"
     ) {
       return null;

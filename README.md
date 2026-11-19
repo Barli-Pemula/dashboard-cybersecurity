@@ -2,6 +2,27 @@
 
 Aplikasi dashboard cybersecurity berbasis Next.js untuk simulasi monitoring ancaman, pemindaian URL, dan manajemen laporan keamanan.
 
+## Akses Demo Tanpa Akun Asli
+
+Jalankan `npm run dev`, buka [halaman login lokal](http://localhost:3000/login), lalu pilih **Open demo workspace**. Akun **Demo analyst** tidak memerlukan email, password, registrasi, atau database yang aktif.
+
+- Sesi demo ditandatangani, menggunakan cookie HttpOnly/SameSite, dan berakhir setelah 8 jam.
+- Data awal, riwayat scan, dan laporan demo tersimpan di localStorage browser. Refresh dan perpindahan halaman mempertahankan data tersebut.
+- Data demo tidak pernah disimpan ke tabel pengguna, scan, atau laporan asli.
+- Gunakan **Reset demo data** dari menu akun untuk mengembalikan contoh awal. **Exit demo** menghapus sesi demo.
+- Ekspor overview, hasil scan, dan laporan tersedia dalam format JSON.
+- Demo aktif secara default saat development. Untuk mengaktifkannya pada build produksi, set `ENABLE_DEMO=true` serta `NEXTAUTH_SECRET` atau `DEMO_SECRET`. Set `ENABLE_DEMO=false` untuk menonaktifkannya.
+
+Scanner dan threat stream menggunakan simulasi. Scanner tidak melakukan request atau pengujian terhadap target. Profil Full, Quick, SSL/TLS, dan HTTP headers menghasilkan kelompok temuan yang sesuai. Jangan memakai skor simulasi sebagai hasil audit sistem nyata.
+
+## Pembaruan Desain dan Fungsi
+
+Desain memakai navigasi navy, area baca terang, aksen hijau, tipografi sistem tanpa unduhan font, serta navigasi bawah pada mobile. Layout memiliki keadaan berbeda untuk ponsel, tablet, dan desktop. Grafik menyesuaikan lebar area plot agar teks tetap terbaca pada mobile.
+
+Metrik dihitung dari record workspace. Pencarian, filter severity/status, pagination event, detail event, pause/start stream simulasi, detail laporan, rekomendasi temuan, dan ekspor terhubung ke tindakan yang berfungsi. Error, loading, dan empty state menyediakan arahan lanjutan.
+
+Panduan desain ada di [DESIGN.md](DESIGN.md), dan hasil evaluasi ada di [docs/AUDIT.md](docs/AUDIT.md). Skill dari [antislop-ai](https://github.com/miqdadbadjuber/anti-slop) dan [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) terpasang secara lokal di `.agents/skills/`; skill tidak ditambahkan sebagai dependency runtime aplikasi.
+
 ## Ringkasan
 
 CyberSentinel menyediakan alur kerja sederhana untuk tim keamanan:
@@ -99,7 +120,7 @@ Buka `http://localhost:3000` di browser.
 - Endpoint registrasi: `POST /api/auth/register`
 - Login menggunakan Credentials provider dari NextAuth.
 - Session strategy menggunakan JWT.
-- Route `/dashboard`, `/scanner`, `/reports` hanya bisa diakses pengguna terautentikasi.
+- Route `/dashboard`, `/scanner`, `/reports` memerlukan sesi akun asli atau sesi demo yang valid. Endpoint data juga memerlukan sesi tersebut.
 
 ## Endpoint API
 
@@ -135,6 +156,10 @@ Buka `http://localhost:3000` di browser.
 - `npm run build` - Build production.
 - `npm run start` - Jalankan hasil build.
 - `npm run lint` - Jalankan linting.
+- `npm run typecheck` - Periksa TypeScript.
+- `npm test` - Uji validasi URL, profil scan, dan perhitungan risiko (Node 22.18+).
+- `npm run test:browser` - Verifikasi alur dan layout melalui Chromium/Edge headless; jalankan server lokal pada port 3000 lebih dulu.
+- `npm run test:browser` - Uji alur demo dan layout dengan Chrome/Edge headless terisolasi. Jalankan server lokal terlebih dahulu; gunakan `TEST_BASE_URL` untuk alamat lain. Screenshot dan laporan dihasilkan ke `artifacts/`.
 
 ## Prisma
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { DEMO_COOKIE, validDemoToken } from "@/lib/demo-auth";
 
 // Routes that require authentication
 const protectedRoutes = ["/dashboard", "/scanner", "/reports"];
@@ -15,10 +16,12 @@ export async function middleware(request: NextRequest) {
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
   });
+  const authenticated =
+    !!token || (await validDemoToken(request.cookies.get(DEMO_COOKIE)?.value));
 
   // Redirect authenticated users away from auth pages
   if (authRoutes.some((route) => pathname.startsWith(route))) {
-    if (token) {
+    if (authenticated) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     return NextResponse.next();
@@ -26,7 +29,7 @@ export async function middleware(request: NextRequest) {
 
   // Protect dashboard routes
   if (protectedRoutes.some((route) => pathname.startsWith(route))) {
-    if (!token) {
+    if (!authenticated) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
@@ -35,7 +38,7 @@ export async function middleware(request: NextRequest) {
 
   // Redirect root to dashboard or login
   if (pathname === "/") {
-    if (token) {
+    if (authenticated) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     return NextResponse.redirect(new URL("/login", request.url));

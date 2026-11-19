@@ -1,7 +1,4 @@
-const rateLimitMap = new Map<
-  string,
-  { count: number; lastReset: number }
->();
+const rateLimitMap = new Map<string, { count: number; lastReset: number }>();
 
 export interface RateLimitConfig {
   windowMs: number;
@@ -15,7 +12,7 @@ const DEFAULT_CONFIG: RateLimitConfig = {
 
 export function rateLimit(
   identifier: string,
-  config: RateLimitConfig = DEFAULT_CONFIG
+  config: RateLimitConfig = DEFAULT_CONFIG,
 ): { success: boolean; remaining: number; resetIn: number } {
   const now = Date.now();
   const record = rateLimitMap.get(identifier);
@@ -46,7 +43,7 @@ export function rateLimit(
 }
 
 // Clean up old entries periodically
-setInterval(() => {
+const cleanup = setInterval(() => {
   const now = Date.now();
   for (const [key, value] of rateLimitMap.entries()) {
     if (now - value.lastReset > 5 * 60 * 1000) {
@@ -54,3 +51,4 @@ setInterval(() => {
     }
   }
 }, 60 * 1000);
+cleanup.unref?.();

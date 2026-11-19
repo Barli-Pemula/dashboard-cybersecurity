@@ -1,45 +1,54 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAccess } from "@/lib/access";
+import { createDemoWorkspace } from "@/lib/demo-data";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session || !session.user?.email) {
+    const access = await getAccess();
+    if (!access)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (access.demo) {
+      const workspace = createDemoWorkspace();
       return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
+        [
+          ...workspace.scans.map((scan) => ({
+            id: scan.id,
+            type: "scan",
+            title: `Scan: ${scan.targetUrl}`,
+            message: `Risk score: ${scan.riskScore}`,
+            timestamp: scan.startedAt,
+          })),
+          ...workspace.reports.map((report) => ({
+            id: report.id,
+            type: "report",
+            title: report.title,
+            message: report.summary,
+            timestamp: report.createdAt,
+          })),
+        ].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
       );
     }
-
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { id: access.id },
     });
 
     if (!user) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Fetch recent scans
     const recentScans = await prisma.scanResult.findMany({
       where: { userId: user.id },
       orderBy: { startedAt: "desc" },
       take: 10,
     });
 
-    // Fetch recent reports
     const recentReports = await prisma.report.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       take: 10,
     });
 
-    // Combine and format as personal activity
     const activities = [
       ...recentScans.map((scan) => ({
         id: scan.id,
@@ -66,14 +75,17 @@ export async function GET(request: NextRequest) {
           status: report.status,
         },
       })),
-    ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    ].sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
 
     return NextResponse.json(activities);
   } catch (error) {
     console.error("Error fetching activities:", error);
     return NextResponse.json(
       { error: "Failed to fetch activities" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

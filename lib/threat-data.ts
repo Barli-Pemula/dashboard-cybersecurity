@@ -20,16 +20,12 @@ const THREAT_TYPES = [
 const SEVERITIES: string[] = ["critical", "high", "medium", "low", "info"];
 
 const SOURCES = [
-  "185.220.101.42",
-  "45.33.32.156",
-  "103.224.182.250",
-  "91.121.209.194",
-  "178.62.197.130",
-  "5.188.86.10",
-  "89.248.172.16",
-  "162.142.125.40",
-  "71.6.135.131",
-  "80.82.77.139",
+  "192.0.2.42",
+  "192.0.2.156",
+  "198.51.100.25",
+  "198.51.100.194",
+  "203.0.113.130",
+  "203.0.113.10",
 ];
 
 const TARGETS = [
@@ -64,20 +60,23 @@ function randomItem<T>(arr: T[]): T {
 
 export function generateThreatEvent() {
   const severity = randomItem(SEVERITIES);
+  const type = randomItem(THREAT_TYPES);
+  const country = randomItem(COUNTRIES);
   return {
     id: `threat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    type: randomItem(THREAT_TYPES),
+    type,
     severity,
     source: randomItem(SOURCES),
     target: randomItem(TARGETS),
-    country: randomItem(COUNTRIES),
-    details: `Detected suspicious ${randomItem(THREAT_TYPES).toLowerCase()} activity from ${randomItem(COUNTRIES)}.`,
-    status: severity === "critical" || severity === "high" ? "active" : "monitored",
+    country,
+    details: `Simulated ${type.toLowerCase()} event. The source, location, and target are example values.`,
+    status:
+      severity === "critical" || severity === "high" ? "active" : "monitored",
     timestamp: new Date().toISOString(),
   };
 }
 
-export function generateScanFindings(url: string) {
+export function generateScanFindings(url: string, scanType = "full") {
   const findings = [];
   const possibleFindings = [
     {
@@ -143,26 +142,43 @@ export function generateScanFindings(url: string) {
     {
       title: "Cookie Missing Secure Flag",
       severity: "medium",
-      description:
-        "Session cookies do not have the Secure flag set.",
-      recommendation:
-        "Set the Secure flag on all sensitive cookies.",
+      description: "Session cookies do not have the Secure flag set.",
+      recommendation: "Set the Secure flag on all sensitive cookies.",
     },
     {
       title: "DNS Zone Transfer Available",
       severity: "info",
       description: "DNS zone transfer (AXFR) is available to any client.",
-      recommendation: "Restrict zone transfers to authorized secondary DNS servers.",
+      recommendation:
+        "Restrict zone transfers to authorized secondary DNS servers.",
     },
   ];
 
-  // Pick 3-7 random findings
-  const count = 3 + Math.floor(Math.random() * 5);
-  const shuffled = possibleFindings.sort(() => Math.random() - 0.5);
-  for (let i = 0; i < Math.min(count, shuffled.length); i++) {
+  // Repeatable simulation with checks selected by scan profile.
+  const hash = Array.from(url).reduce(
+    (total, char) => (total * 31 + char.charCodeAt(0)) >>> 0,
+    7,
+  );
+  const candidates = possibleFindings.filter((finding) =>
+    scanType === "ssl"
+      ? /TLS|Cipher/.test(finding.title)
+      : scanType === "headers"
+        ? /Header|Disclosure/.test(finding.title)
+        : true,
+  );
+  const ordered = candidates.map(
+    (_, i) => candidates[(i + (hash % candidates.length)) % candidates.length],
+  );
+  const count =
+    scanType === "quick"
+      ? 2
+      : scanType === "full"
+        ? 3 + (hash % 3)
+        : candidates.length;
+  for (let i = 0; i < Math.min(count, ordered.length); i++) {
     findings.push({
       id: `finding-${Date.now()}-${i}`,
-      ...shuffled[i],
+      ...ordered[i],
       url,
       detectedAt: new Date().toISOString(),
     });
@@ -172,7 +188,7 @@ export function generateScanFindings(url: string) {
 }
 
 export function calculateRiskScore(
-  findings: Array<{ severity: string }>
+  findings: Array<{ severity: string }>,
 ): number {
   let score = 0;
   for (const f of findings) {

@@ -1,29 +1,12 @@
-"use client";
-
-import { useState } from "react";
-import AuthProvider from "@/components/AuthProvider";
-import ClientNotificationProvider from "@/components/ClientNotificationProvider";
-import Sidebar from "@/components/Sidebar";
-import Header from "@/components/Header";
-
-export default function DashboardLayout({
+import { redirect } from "next/navigation";
+import { getAccess } from "@/lib/access";
+import AppShell from "@/components/AppShell";
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  return (
-    <AuthProvider>
-      <ClientNotificationProvider>
-        <div className="flex min-h-screen bg-surface-50">
-          <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-          <div className="flex-1 w-full lg:ml-60 min-w-0">
-            <Header onMenuToggle={() => setSidebarOpen((v) => !v)} />
-            <main className="p-4 lg:p-6 max-w-6xl">{children}</main>
-          </div>
-        </div>
-      </ClientNotificationProvider>
-    </AuthProvider>
-  );
+  const access = await getAccess();
+  if (!access) redirect("/login");
+  return <AppShell access={access}>{children}</AppShell>;
 }

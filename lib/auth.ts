@@ -2,6 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,8 +17,16 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Email and password are required");
         }
 
+        const email = credentials.email.toLowerCase().trim();
+        if (
+          email.length > 254 ||
+          credentials.password.length > 1024 ||
+          !rateLimit(`login:${email}`, { windowMs: 60000, maxRequests: 10 })
+            .success
+        )
+          throw new Error("Please wait before trying again");
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { email },
         });
 
         if (!user) {
@@ -26,7 +35,7 @@ export const authOptions: NextAuthOptions = {
 
         const isValid = await bcrypt.compare(
           credentials.password,
-          user.password
+          user.password,
         );
 
         if (!isValid) {

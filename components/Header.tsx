@@ -1,93 +1,161 @@
 "use client";
-
-import { useSession, signOut } from "next-auth/react";
-import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import NotificationDropdown from "./NotificationDropdown";
-
-interface HeaderProps {
-  onMenuToggle: () => void;
-}
-
-export default function Header({ onMenuToggle }: HeaderProps) {
-  const { data: session } = useSession();
-  const [showMenu, setShowMenu] = useState(false);
-
-  const userName = session?.user?.name || "Operator";
-  const userEmail = session?.user?.email || "";
-  const initials = userName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-
+import { useEffect, useRef, useState } from "react";
+import { signOut } from "next-auth/react";
+import { usePathname } from "next/navigation";
+import { useAccess } from "@/components/WorkspaceProvider";
+import { resetDemoWorkspace, requestJSON } from "@/lib/workspace";
+import { useNotifications } from "@/context/NotificationContext";
+import Icon from "@/components/ui/Icon";
+import Modal from "@/components/ui/Modal";
+import NotificationDropdown from "@/components/NotificationDropdown";
+export default function Header() {
+  const access = useAccess();
+  const pathname = usePathname();
+  const { showToast } = useNotifications();
+  const [open, setOpen] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+  async function exit() {
+    setLeaving(true);
+    try {
+      await requestJSON("/api/demo", { method: "DELETE" });
+      if (access.demo) window.location.assign("/login");
+      else await signOut({ callbackUrl: "/login" });
+    } catch (error) {
+      showToast({
+        type: "error",
+        title: "Unable to sign out",
+        message: (error as Error).message,
+      });
+      setLeaving(false);
+    }
+  }
   return (
-    <header className="h-14 lg:h-16 bg-white border-b border-surface-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
-      {/* Left */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onMenuToggle}
-          className="lg:hidden p-1.5 rounded-lg text-surface-500 hover:text-surface-700 hover:bg-surface-100 transition-colors"
-          aria-label="Menu"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-          </svg>
-        </button>
-
-        <div className="hidden md:flex items-center gap-2 text-xs text-surface-400">
-          <span className="status-dot-online" />
-          <span>Secure connection</span>
+    <>
+      <header className="app-header">
+        <div className="breadcrumb">
+          <span className="desktop-breadcrumb">
+            Workspace
+            <Icon name="chevron" size={14} />
+          </span>
+          <strong>
+            {pathname === "/scanner"
+              ? "Vulnerability scanner"
+              : pathname === "/reports"
+                ? "Security reports"
+                : "Overview"}
+          </strong>
         </div>
-      </div>
-
-      {/* Right */}
-      <div className="flex items-center gap-2">
-        <NotificationDropdown />
-
-        <div className="relative">
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-surface-100 transition-colors"
-          >
-            <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 text-xs font-semibold">
-              {initials}
-            </div>
-            <span className="hidden md:block text-sm font-medium text-surface-700">{userName}</span>
-          </button>
-
-          <AnimatePresence>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-                <motion.div
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 4 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute right-0 top-full mt-1.5 w-52 bg-white border border-surface-200 rounded-xl shadow-lg p-1.5 z-50"
-                >
-                  <div className="px-3 py-2 mb-1">
-                    <p className="text-sm font-medium text-surface-800">{userName}</p>
-                    <p className="text-xs text-surface-400 mt-0.5">{userEmail}</p>
-                  </div>
-                  <div className="divider my-1" />
+        <div className="header-actions">
+          {access.demo && <span className="demo-tag">Demo mode</span>}
+          <NotificationDropdown />
+          <span className="header-divider" />
+          <div ref={ref} className="account-wrapper">
+            <button
+              className="account-button"
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              aria-controls="account-menu"
+              aria-label="Account menu"
+            >
+              <span className="avatar">
+                {access.name
+                  .split(" ")
+                  .map((part) => part[0])
+                  .join("")
+                  .slice(0, 2)}
+              </span>
+              <span className="account-name">
+                {access.name}
+                <small>
+                  {access.demo ? "Demo account" : "Security analyst"}
+                </small>
+              </span>
+              <Icon name="down" size={14} />
+            </button>
+            {open && (
+              <div className="account-menu" id="account-menu">
+                <p>
+                  {access.name}
+                  <small>{access.email}</small>
+                </p>
+                {access.demo && (
                   <button
-                    onClick={() => signOut({ callbackUrl: "/login" })}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    onClick={() => {
+                      setConfirmReset(true);
+                      setOpen(false);
+                    }}
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-                    </svg>
-                    Sign out
+                    <Icon name="refresh" size={17} />
+                    Reset demo data
                   </button>
-                </motion.div>
-              </>
+                )}
+                <button onClick={exit} disabled={leaving}>
+                  <Icon name="logout" size={17} />
+                  {leaving
+                    ? "Signing out…"
+                    : access.demo
+                      ? "Exit demo"
+                      : "Sign out"}
+                </button>
+              </div>
             )}
-          </AnimatePresence>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+      {confirmReset && (
+        <Modal title="Reset demo data?" onClose={() => setConfirmReset(false)}>
+          <p className="muted">
+            This replaces scans and reports in this demo browser with the
+            original examples. Download any reports you want to keep first.
+          </p>
+          <div className="modal-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => setConfirmReset(false)}
+            >
+              Keep my data
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                try {
+                  resetDemoWorkspace();
+                  setConfirmReset(false);
+                  showToast({
+                    type: "success",
+                    title: "Demo data reset",
+                    message: "The original example records are ready.",
+                  });
+                } catch (error) {
+                  showToast({
+                    type: "error",
+                    title: "Reset failed",
+                    message: (error as Error).message,
+                  });
+                }
+              }}
+            >
+              Reset demo data
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

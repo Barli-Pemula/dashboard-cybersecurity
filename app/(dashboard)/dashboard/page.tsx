@@ -1,58 +1,158 @@
 "use client";
-
-import dynamic from "next/dynamic";
+import { useState } from "react";
+import Link from "next/link";
+import { useAccess, useWorkspace } from "@/components/WorkspaceProvider";
 import StatsCard from "@/components/ui/StatsCard";
-import { motion } from "framer-motion";
-
-const ThreatChart = dynamic(() => import("@/components/ui/ThreatChart"), {
-  ssr: false,
-  loading: () => <div className="card p-5"><div className="shimmer h-[220px] w-full" /></div>,
-});
-const ThreatFeed = dynamic(() => import("@/components/dashboard/ThreatFeed"), {
-  ssr: false,
-  loading: () => <div className="card p-5"><div className="shimmer h-[280px] w-full" /></div>,
-});
-const SecurityNews = dynamic(() => import("@/components/dashboard/SecurityNews"), {
-  ssr: false,
-  loading: () => <div className="card p-5"><div className="shimmer h-[220px] w-full" /></div>,
-});
-
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-
+import ThreatChart from "@/components/ui/ThreatChart";
+import ThreatFeed from "@/components/dashboard/ThreatFeed";
+import SecurityNews from "@/components/dashboard/SecurityNews";
+import Icon from "@/components/ui/Icon";
+import { ErrorMessage, LoadingState } from "@/components/ui/Feedback";
+import { downloadJSON } from "@/lib/workspace";
 export default function DashboardPage() {
+  const { demo } = useAccess();
+  const { scans, reports, threats, loading, error, refresh } = useWorkspace();
+  const [hours, setHours] = useState(24);
+  const selected = threats.filter(
+    (threat) =>
+      Date.now() - new Date(threat.timestamp).getTime() <= hours * 3600000,
+  );
+  const active = selected.filter((threat) => threat.status === "active").length;
+  const findings = scans.flatMap((scan) => scan.findings);
+  const critical = findings.filter(
+    (finding) => finding.severity === "critical" || finding.severity === "high",
+  ).length;
+  const average = scans.length
+    ? Math.round(
+        scans.reduce((sum, scan) => sum + scan.riskScore, 0) / scans.length,
+      )
+    : null;
   return (
-    <motion.div variants={container} initial="hidden" animate="show">
-      {/* Page header */}
-      <div className="mb-5 lg:mb-6">
-        <h1 className="text-lg lg:text-xl font-semibold text-surface-800">
-          What&apos;s happening today
-        </h1>
-        <p className="text-sm text-surface-400 mt-1">
-          Real-time security posture overview
-        </p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-5 lg:mb-6">
-        <StatsCard title="Active Threats" value="247" change="+12%" changeType="negative" icon={null} />
-        <StatsCard title="Scans Completed" value="1,834" change="+8%" changeType="positive" icon={null} />
-        <StatsCard title="Vulnerabilities" value="42" change="-5%" changeType="positive" icon={null} />
-        <StatsCard title="Risk Score" value="72/100" change="Medium" changeType="neutral" icon={null} />
-      </div>
-
-      {/* Charts + News */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 mb-5 lg:mb-6">
-        <div className="lg:col-span-2">
-          <ThreatChart />
+    <div className="page-enter">
+      <div className="page-heading">
+        <div>
+          <div className="page-eyebrow">Security operations</div>
+          <h1>Security overview</h1>
+          <p>A clear view of your events, assessments, and findings.</p>
         </div>
-        <SecurityNews />
+        <div className="page-actions">
+          <label className="period-select">
+            <Icon name="calendar" size={17} />
+            <span className="sr-only">Event time range</span>
+            <select
+              value={hours}
+              onChange={(event) => setHours(Number(event.target.value))}
+            >
+              <option value={24}>Last 24 hours</option>
+              <option value={12}>Last 12 hours</option>
+              <option value={6}>Last 6 hours</option>
+            </select>
+          </label>
+          <button
+            className="btn-secondary"
+            disabled={loading || !!error}
+            onClick={() =>
+              downloadJSON(
+                {
+                  exportedAt: new Date().toISOString(),
+                  demo,
+                  scans,
+                  reports,
+                  threats: selected,
+                },
+                "cybersentinel-overview.json",
+              )
+            }
+          >
+            <Icon name="download" size={17} />
+            Export overview
+          </button>
+        </div>
       </div>
-
-      {/* Events */}
-      <ThreatFeed />
-    </motion.div>
+      {demo && (
+        <div className="workspace-banner">
+          <span className="banner-icon">
+            <Icon name="shield" size={24} />
+          </span>
+          <div>
+            <strong>Your demo workspace is ready.</strong>
+            <p>
+              Explore example events and try a simulated security assessment.
+            </p>
+          </div>
+          <Link href="/scanner" className="banner-link">
+            Run your first scan
+            <Icon name="chevron" size={16} />
+          </Link>
+        </div>
+      )}
+      {error && <ErrorMessage message={error} retry={refresh} />}
+      {loading ? (
+        <LoadingState />
+      ) : (
+        !error && (
+          <>
+            <div className="stats-grid">
+              <StatsCard
+                title="Active events"
+                value={active.toString().padStart(2, "0")}
+                detail={`${selected.length} events in this period`}
+                icon="activity"
+                tone={active ? "danger" : "neutral"}
+              />
+              <StatsCard
+                title="Completed scans"
+                value={scans
+                  .filter((scan) => scan.status === "completed")
+                  .length.toString()
+                  .padStart(2, "0")}
+                detail="In your scan history"
+                icon="scan"
+              />
+              <StatsCard
+                title="Priority findings"
+                value={critical.toString().padStart(2, "0")}
+                detail="Critical and high severity"
+                icon="alert"
+                tone={critical ? "danger" : "neutral"}
+              />
+              <StatsCard
+                title="Average risk score"
+                value={average === null ? "N/A" : `${average}`}
+                detail={
+                  average === null
+                    ? "Run a scan to calculate"
+                    : "Out of 100 · Across all scans"
+                }
+                icon="shield"
+              />
+            </div>
+            <div className="dashboard-charts">
+              <ThreatChart threats={selected} hours={hours} />
+              <SecurityNews scans={scans} />
+            </div>
+            <ThreatFeed threats={selected} demo={demo} />
+            <div className="workflow-strip">
+              <div>
+                <span className="workflow-icon">
+                  <Icon name="reports" size={22} />
+                </span>
+                <div>
+                  <strong>Turn findings into a clear report.</strong>
+                  <p>
+                    {reports.length}{" "}
+                    {reports.length === 1 ? "report" : "reports"} in your
+                    workspace. Document your next assessment.
+                  </p>
+                </div>
+              </div>
+              <Link href="/reports" className="btn-secondary">
+                View security reports
+              </Link>
+            </div>
+          </>
+        )
+      )}
+    </div>
   );
 }

@@ -1,70 +1,128 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAccess } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
-import { sanitizeInput, stripHtml } from "@/lib/sanitize";
+import { stripHtml } from "@/lib/sanitize";
+import { createDemoWorkspace } from "@/lib/demo-data";
+import { REPORT_TYPES, SEVERITIES } from "@/lib/types";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const access = await getAccess();
+    if (!access)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = (session.user as { id?: string }).id || "unknown";
-    const body = await request.json();
-    const { title, type, severity, summary, findings } = body;
-
-    if (!title || !summary) {
+    if (
+      !rateLimit(
+        `report:${access.demo ? request.cookies.get("sentinel-demo")?.value.slice(-20) : access.id}`,
+        { windowMs: 60000, maxRequests: 20 },
+      ).success
+    )
       return NextResponse.json(
-        { error: "Title and summary are required" },
-        { status: 400 }
+        { error: "Report limit reached. Please wait a minute." },
+        { status: 429 },
       );
-    }
-
+    const body = await request.json().catch(() => null);
+    const {
+      title,
+      summary,
+      type = "assessment",
+      severity = "medium",
+      findings = [],
+    } = body || {};
+    if (
+      typeof title !== "string" ||
+      typeof summary !== "string" ||
+      !title.trim() ||
+      !summary.trim() ||
+      title.length > 160 ||
+      summary.length > 10000 ||
+      !REPORT_TYPES.some((item) => item.value === type) ||
+      !SEVERITIES.includes(severity) ||
+      !Array.isArray(findings) ||
+      findings.length > 100 ||
+      findings.some(
+        (finding) =>
+          !finding ||
+          typeof finding !== "object" ||
+          typeof finding.title !== "string" ||
+          typeof finding.description !== "string" ||
+          typeof finding.recommendation !== "string" ||
+          !SEVERITIES.includes(finding.severity),
+      )
+    )
+      return NextResponse.json(
+        {
+          error:
+            "Provide a title (up to 160 characters), a summary (up to 10,000 characters), and valid report fields.",
+        },
+        { status: 400 },
+      );
+    const cleanTitle = stripHtml(title).trim();
+    const cleanSummary = stripHtml(summary).trim();
+    if (!cleanTitle || !cleanSummary)
+      return NextResponse.json(
+        { error: "Title and summary must contain readable text." },
+        { status: 400 },
+      );
+    const now = new Date().toISOString();
+    if (access.demo)
+      return NextResponse.json(
+        {
+          id: crypto.randomUUID(),
+          title: cleanTitle,
+          summary: cleanSummary,
+          type,
+          severity,
+          findings,
+          status: "draft",
+          createdAt: now,
+          updatedAt: now,
+        },
+        { status: 201 },
+      );
     const report = await prisma.report.create({
       data: {
-        title: sanitizeInput(stripHtml(title)),
-        type: type || "assessment",
-        severity: severity || "medium",
-        summary: sanitizeInput(stripHtml(summary)),
+        title: cleanTitle,
+        summary: cleanSummary,
+        type,
+        severity,
         status: "draft",
-        findings: findings ? JSON.stringify(findings) : "[]",
-        userId,
+        findings: JSON.stringify(findings),
+        userId: access.id,
       },
     });
-
-    return NextResponse.json(report, { status: 201 });
-  } catch (error) {
-    console.error("Error creating report:", error);
+    return NextResponse.json({ ...report, findings }, { status: 201 });
+  } catch {
     return NextResponse.json(
-      { error: "Failed to create report" },
-      { status: 500 }
+      {
+        error:
+          "Unable to save the report. Check your database connection and try again.",
+      },
+      { status: 500 },
     );
   }
 }
-
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const access = await getAccess();
+    if (!access)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = (session.user as { id?: string }).id || "unknown";
-
+    if (access.demo) return NextResponse.json(createDemoWorkspace().reports);
     const reports = await prisma.report.findMany({
-      where: { userId },
+      where: { userId: access.id },
       orderBy: { createdAt: "desc" },
-      take: 20,
+      take: 50,
     });
-
-    return NextResponse.json(reports);
-  } catch (error) {
-    console.error("Error fetching reports:", error);
     return NextResponse.json(
-      { error: "Failed to fetch reports" },
-      { status: 500 }
+      reports.map((report) => ({
+        ...report,
+        findings: JSON.parse(report.findings),
+      })),
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Unable to load reports. Check your database connection." },
+      { status: 500 },
     );
   }
 }

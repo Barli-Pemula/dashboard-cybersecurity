@@ -1,302 +1,358 @@
 "use client";
-
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAccess, useWorkspace } from "@/components/WorkspaceProvider";
+import { useNotifications } from "@/context/NotificationContext";
+import { runScan, saveReport, downloadJSON } from "@/lib/workspace";
+import { SCAN_TYPES, formatDate, riskLevel, type Scan } from "@/lib/types";
+import { SEVERITY_ORDER } from "@/lib/threat-data";
+import Icon from "@/components/ui/Icon";
 import SeverityBadge from "@/components/ui/SeverityBadge";
-
-interface Finding {
-  id: string;
-  title: string;
-  severity: string;
-  description: string;
-  recommendation: string;
-  url: string;
-  detectedAt: string;
-}
-
-interface ScanResult {
-  id: string;
-  targetUrl: string;
-  scanType: string;
-  status: string;
-  riskScore: number;
-  findings: Finding[];
-  startedAt: string;
-  completedAt: string;
-}
-
+import {
+  EmptyState,
+  ErrorMessage,
+  LoadingState,
+} from "@/components/ui/Feedback";
 export default function ScannerPage() {
+  const { demo } = useAccess();
+  const { scans, loading, error: loadError, refresh } = useWorkspace();
+  const { showToast } = useNotifications();
+  const router = useRouter();
   const [url, setUrl] = useState("");
   const [scanType, setScanType] = useState("full");
   const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const [history, setHistory] = useState<ScanResult[]>([]);
+  const [creatingReport, setCreatingReport] = useState(false);
+  const [result, setResult] = useState<Scan | null>(null);
   const [error, setError] = useState("");
-  const [expandedFinding, setExpandedFinding] = useState<string | null>(null);
-
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (result) {
+      const section = document.getElementById("scan-results");
+      section?.focus({ preventScroll: true });
+      section?.scrollIntoView({ block: "start" });
+    }
+  }, [result]);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
     setError("");
     setScanning(true);
-    setResult(null);
-
     try {
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, scanType }),
+      const scan = await runScan(demo, url.trim(), scanType);
+      setResult(scan);
+      showToast({
+        type: "success",
+        title: "Assessment complete",
+        message: `${scan.findings.length} simulated findings are ready to review.`,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Scan failed");
-        return;
-      }
-      setResult(data);
-      setHistory((prev) => [data, ...prev]);
-      setUrl("");
-    } catch {
-      setError("Unable to complete the scan. Please try again.");
+    } catch (error) {
+      setError((error as Error).message);
     } finally {
       setScanning(false);
     }
-  };
-
-  const getRiskColor = (score: number) => {
-    if (score >= 75) return "text-red-600";
-    if (score >= 50) return "text-orange-600";
-    if (score >= 25) return "text-amber-600";
-    return "text-green-600";
-  };
-
-  const getRiskLabel = (score: number) => {
-    if (score >= 75) return "Critical";
-    if (score >= 50) return "High";
-    if (score >= 25) return "Medium";
-    return "Low";
-  };
-
-  const getRiskBarColor = (score: number) => {
-    if (score >= 75) return "bg-red-500";
-    if (score >= 50) return "bg-orange-500";
-    if (score >= 25) return "bg-amber-500";
-    return "bg-green-500";
-  };
-
+  }
+  async function createReport() {
+    if (!result) return;
+    setCreatingReport(true);
+    try {
+      await saveReport(demo, {
+        title: `Assessment: ${new URL(result.targetUrl).hostname}`,
+        type: "assessment",
+        severity: riskLevel(result.riskScore),
+        summary: `Simulated ${SCAN_TYPES.find((item) => item.value === result.scanType)?.label || result.scanType} for ${result.targetUrl}. Risk score: ${result.riskScore}/100. ${result.findings.length} illustrative findings are attached. This assessment does not verify the security of the target.`,
+        findings: result.findings,
+      });
+      showToast({
+        type: "success",
+        title: "Report created",
+        message: "Your assessment and findings have been saved as a draft.",
+      });
+      router.push("/reports");
+    } catch (error) {
+      showToast({
+        type: "error",
+        title: "Unable to create report",
+        message: (error as Error).message,
+      });
+    } finally {
+      setCreatingReport(false);
+    }
+  }
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-5 lg:mb-6">
-        <h1 className="text-lg lg:text-xl font-semibold text-surface-800">
-          What needs to be scanned?
-        </h1>
-        <p className="text-sm text-surface-400 mt-1">
-          Enter a target URL to check for security vulnerabilities
-        </p>
+    <div className="page-enter">
+      <div className="page-heading">
+        <div>
+          <div className="page-eyebrow">Assessment tools</div>
+          <h1>Vulnerability scanner</h1>
+          <p>Run an assessment and turn the findings into a plan.</p>
+        </div>
+        <span className="simulation-label">
+          <Icon name="info" size={16} />
+          Simulation environment
+        </span>
       </div>
-
-      {/* Scan form */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="card p-4 lg:p-5 mb-5"
-      >
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-            {error}
+      <div className="scanner-intro">
+        <div className="card scanner-form-card">
+          <div className="section-heading">
+            <h2>New assessment</h2>
+            <span className="subtle-label">URL scanner</span>
           </div>
-        )}
-        <form onSubmit={handleScan} className="flex flex-col md:flex-row gap-3">
-          <input
-            id="scan-url"
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="input-mono flex-1"
-            placeholder="https://example.com"
-            required
-          />
-          <select
-            id="scan-type"
-            value={scanType}
-            onChange={(e) => setScanType(e.target.value)}
-            className="input w-full md:w-40"
-          >
-            <option value="full">Full Scan</option>
-            <option value="quick">Quick Scan</option>
-            <option value="ssl">SSL/TLS Only</option>
-            <option value="headers">Headers Only</option>
-          </select>
-          <button
-            id="start-scan"
-            type="submit"
-            disabled={scanning}
-            className="btn-primary whitespace-nowrap"
-          >
-            {scanning ? "Processing..." : "Start scan"}
-          </button>
-        </form>
-      </motion.div>
-
-      {/* Results */}
-      <AnimatePresence>
-        {result && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="card p-4 lg:p-5 mb-5"
-          >
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <p className="text-sm font-medium text-surface-700 mb-0.5">Scan results</p>
-                <p className="text-xs text-surface-400 font-mono truncate max-w-[200px] lg:max-w-none">
-                  {result.targetUrl}
-                </p>
+          <p className="muted">
+            Choose a target and the checks you want to explore.
+          </p>
+          <form onSubmit={submit} className="scan-form">
+            <div className="field">
+              <label htmlFor="scan-url">Target URL</label>
+              <div className="input-with-icon">
+                <Icon name="globe" size={19} />
+                <input
+                  id="scan-url"
+                  className="input"
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://your-domain.com"
+                  required
+                  maxLength={2048}
+                  aria-describedby="url-help scan-error"
+                  aria-invalid={!!error}
+                  disabled={scanning}
+                />
               </div>
-              <div className="text-right">
-                <p className={`text-2xl font-bold ${getRiskColor(result.riskScore)}`}>
-                  {result.riskScore}
-                </p>
-                <p className="text-xs text-surface-400">
-                  {getRiskLabel(result.riskScore)} risk
-                </p>
-              </div>
+              <p id="url-help" className="field-hint">
+                A public HTTP or HTTPS address. Private hosts are excluded.
+              </p>
             </div>
-
-            {/* Risk bar */}
-            <div className="w-full bg-surface-100 rounded-full h-1.5 mb-5">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${result.riskScore}%` }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
-                className={`h-1.5 rounded-full ${getRiskBarColor(result.riskScore)}`}
-              />
+            <fieldset className="scan-profiles">
+              <legend>Assessment profile</legend>
+              {SCAN_TYPES.map((type) => (
+                <label
+                  key={type.value}
+                  className={`profile-option ${scanType === type.value ? "selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="scanType"
+                    value={type.value}
+                    checked={scanType === type.value}
+                    onChange={() => setScanType(type.value)}
+                    disabled={scanning}
+                  />
+                  <span>
+                    <strong>{type.label}</strong>
+                    <small>{type.description}</small>
+                  </span>
+                  <span className="radio-indicator" />
+                </label>
+              ))}
+            </fieldset>
+            <div id="scan-error">
+              {error && <ErrorMessage message={error} />}
             </div>
-
-            {/* Findings */}
-            <p className="text-sm font-medium text-surface-700 mb-3">
-              {result.findings.length} findings
+            <button
+              id="start-scan"
+              type="submit"
+              className="btn-primary"
+              disabled={scanning}
+            >
+              {scanning ? (
+                <span className="loading-spinner" />
+              ) : (
+                <Icon name="scan" size={18} />
+              )}
+              {scanning ? "Running assessment…" : "Start assessment"}
+            </button>
+          </form>
+        </div>
+        <aside className="scanner-explainer">
+          <span className="explainer-icon">
+            <Icon name="shield" size={30} />
+          </span>
+          <h2>Understand your next step.</h2>
+          <p>
+            Explore how a security assessment groups findings, estimates risk,
+            and recommends a response.
+          </p>
+          <ul>
+            <li>
+              <Icon name="check" size={17} />
+              Profile-specific findings
+            </li>
+            <li>
+              <Icon name="check" size={17} />
+              Severity and remediation guidance
+            </li>
+            <li>
+              <Icon name="check" size={17} />
+              Exportable assessment records
+            </li>
+          </ul>
+          <div className="simulation-note">
+            <Icon name="info" size={18} />
+            <p>
+              This scanner generates simulated findings. It does not send
+              traffic to the target or test a live system.
             </p>
-            <div className="space-y-1">
-              {result.findings
-                .sort((a, b) => {
-                  const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-                  return (order[a.severity] ?? 5) - (order[b.severity] ?? 5);
-                })
-                .map((finding) => (
-                  <div
-                    key={finding.id}
-                    className="border border-surface-150 rounded-lg overflow-hidden"
-                  >
-                    <button
-                      onClick={() =>
-                        setExpandedFinding(expandedFinding === finding.id ? null : finding.id)
-                      }
-                      className="w-full p-3 flex items-center justify-between hover:bg-surface-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <SeverityBadge severity={finding.severity} />
-                        <span className="text-sm text-surface-700 truncate">{finding.title}</span>
-                      </div>
-                      <svg
-                        className={`w-4 h-4 text-surface-400 transition-transform shrink-0 ml-2 ${
-                          expandedFinding === finding.id ? "rotate-180" : ""
-                        }`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={2}
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                      </svg>
-                    </button>
-                    <AnimatePresence>
-                      {expandedFinding === finding.id && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="border-t border-surface-150"
-                        >
-                          <div className="p-4 space-y-3 bg-surface-50">
-                            <div>
-                              <p className="text-[11px] uppercase text-surface-400 font-semibold mb-1 tracking-wide">
-                                Description
-                              </p>
-                              <p className="text-sm text-surface-600 leading-relaxed">
-                                {finding.description}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] uppercase text-surface-400 font-semibold mb-1 tracking-wide">
-                                Recommendation
-                              </p>
-                              <p className="text-sm text-primary-700 font-mono break-words leading-relaxed">
-                                {finding.recommendation}
-                              </p>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Scan History */}
-      {history.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="card p-4 lg:p-5"
-        >
-          <p className="text-sm font-medium text-surface-700 mb-3">Recent scans</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-surface-150">
-                  <th className="text-left py-2 px-3 text-xs font-medium text-surface-400">Target</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-surface-400">Type</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-surface-400">Risk</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-surface-400">Findings</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-surface-400">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((scan) => (
-                  <tr
-                    key={scan.id}
-                    className="border-b border-surface-100 hover:bg-surface-50 transition-colors"
-                  >
-                    <td className="py-2.5 px-3 font-mono text-xs text-surface-600 truncate max-w-[180px]">
-                      {scan.targetUrl}
-                    </td>
-                    <td className="py-2.5 px-3 text-xs text-surface-500 capitalize">
-                      {scan.scanType}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className={`font-semibold text-xs ${getRiskColor(scan.riskScore)}`}>
-                        {scan.riskScore}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-xs text-surface-500">
-                      {scan.findings.length}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-green-50 text-green-700">
-                        {scan.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
-        </motion.div>
+          <button
+            className="text-link"
+            onClick={() => {
+              setUrl("https://portal.example.com");
+              document.getElementById("scan-url")?.focus();
+            }}
+          >
+            Use an example target
+          </button>
+        </aside>
+      </div>
+      {result && (
+        <section className="card scan-results" id="scan-results" tabIndex={-1} aria-label="Assessment results">
+          <div className="results-heading">
+            <div>
+              <span className="completed-label">
+                <Icon name="check" size={15} />
+                Assessment completed
+              </span>
+              <h2>Assessment findings</h2>
+              <p className="mono break-anywhere">{result.targetUrl}</p>
+            </div>
+            <div className="risk-score">
+              <strong className={`risk-${riskLevel(result.riskScore)}`}>
+                {result.riskScore}
+                <span>/100</span>
+              </strong>
+              <span className="capitalize">
+                {riskLevel(result.riskScore)} simulated risk
+              </span>
+            </div>
+          </div>
+          <div className={`risk-track risk-${riskLevel(result.riskScore)}`}>
+            <span style={{ width: `${result.riskScore}%` }} />
+          </div>
+          <div className="findings-heading">
+            <h3>{result.findings.length} findings to review</h3>
+            <span>Highest severity first</span>
+          </div>
+          <div className="findings-accordion">
+            {[...result.findings]
+              .sort(
+                (a, b) =>
+                  (SEVERITY_ORDER[a.severity] ?? 5) -
+                  (SEVERITY_ORDER[b.severity] ?? 5),
+              )
+              .map((finding) => (
+                <details key={finding.id}>
+                  <summary>
+                    <SeverityBadge severity={finding.severity} />
+                    <span>{finding.title}</span>
+                    <Icon name="down" size={17} />
+                  </summary>
+                  <div className="finding-content">
+                    <p>{finding.description}</p>
+                    <h4>Recommended action</h4>
+                    <p>{finding.recommendation}</p>
+                  </div>
+                </details>
+              ))}
+          </div>
+          <div className="result-actions">
+            <span className="muted">
+              Illustrative findings, for demonstration only.
+            </span>
+            <div>
+              <button
+                className="btn-secondary"
+                onClick={() =>
+                  downloadJSON(
+                    { ...result, simulated: true },
+                    `scan-${result.id}.json`,
+                  )
+                }
+              >
+                <Icon name="download" size={17} />
+                Export results
+              </button>
+              <button
+                className="btn-primary"
+                disabled={creatingReport}
+                onClick={createReport}
+              >
+                <Icon name="reports" size={17} />
+                {creatingReport ? "Creating report…" : "Create report"}
+              </button>
+            </div>
+          </div>
+        </section>
       )}
+      <section className="card scan-history">
+        <div className="events-heading">
+          <div>
+            <h2>Assessment history</h2>
+            <p>
+              {demo
+                ? "Saved in this browser, including your example scans"
+                : "Your recent assessment records"}
+            </p>
+          </div>
+          <span className="count-label">{scans.length} scans</span>
+        </div>
+        {loadError && <ErrorMessage message={loadError} retry={refresh} />}
+        {loading ? (
+          <LoadingState label="Loading assessment history" />
+        ) : scans.length ? (
+          <div className="scan-history-list">
+            <div className="scan-history-head">
+              <span>Target</span>
+              <span>Profile</span>
+              <span>Risk score</span>
+              <span>Findings</span>
+              <span>Date</span>
+              <span />
+            </div>
+            {scans.map((scan) => (
+              <button
+                className={`scan-history-row ${result?.id === scan.id ? "selected" : ""}`}
+                key={scan.id}
+                onClick={() => {
+                  setResult(scan);
+                  setError("");
+                }}
+                aria-label={`Review scan of ${scan.targetUrl}`}
+              >
+                <span className="history-target">
+                  <Icon name="globe" size={18} />
+                  <span>
+                    {new URL(scan.targetUrl).hostname}
+                    <small>{scan.status}</small>
+                  </span>
+                </span>
+                <span className="history-profile">
+                  {SCAN_TYPES.find((type) => type.value === scan.scanType)
+                    ?.label || scan.scanType}
+                </span>
+                <span>
+                  <strong className={`risk-${riskLevel(scan.riskScore)}`}>
+                    {scan.riskScore}
+                  </strong>
+                  <small className="muted"> / 100</small>
+                </span>
+                <span className="history-findings">
+                  {scan.findings.length} findings
+                </span>
+                <span className="history-date">
+                  {formatDate(scan.startedAt)}
+                </span>
+                <Icon name="chevron" size={16} />
+              </button>
+            ))}
+          </div>
+        ) : (
+          !loadError && (
+            <EmptyState
+              title="Your first assessment starts here"
+              description="Enter a target above and run a simulated assessment. You can return to its findings here."
+            />
+          )
+        )}
+      </section>
     </div>
   );
 }

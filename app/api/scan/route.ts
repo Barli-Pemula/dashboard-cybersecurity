@@ -1,116 +1,103 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAccess } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { sanitizeUrl } from "@/lib/sanitize";
-import {
-  generateScanFindings,
-  calculateRiskScore,
-} from "@/lib/threat-data";
+import { generateScanFindings, calculateRiskScore } from "@/lib/threat-data";
+import { createDemoWorkspace } from "@/lib/demo-data";
+import { SCAN_TYPES } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
-    // Auth check
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const access = await getAccess();
+    if (!access)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Rate limiting
-    const userId = (session.user as { id?: string }).id || "unknown";
-    const limiter = rateLimit(`scan:${userId}`, {
-      windowMs: 60 * 1000,
-      maxRequests: 10,
-    });
-
-    if (!limiter.success) {
+    if (
+      !rateLimit(
+        `scan:${access.demo ? request.cookies.get("sentinel-demo")?.value.slice(-20) : access.id}`,
+        { windowMs: 60000, maxRequests: 10 },
+      ).success
+    )
       return NextResponse.json(
-        { error: "Rate limit exceeded. Try again later." },
-        { status: 429 }
+        { error: "Scan limit reached. Please wait a minute." },
+        { status: 429 },
       );
-    }
-
-    const body = await request.json();
-    const { url, scanType = "full" } = body;
-
-    if (!url) {
+    const body = await request.json().catch(() => null);
+    const { url, scanType = "full" } = body || {};
+    if (
+      typeof url !== "string" ||
+      url.length > 2048 ||
+      !SCAN_TYPES.some((type) => type.value === scanType)
+    )
       return NextResponse.json(
-        { error: "Target URL is required" },
-        { status: 400 }
+        { error: "Enter a valid URL and choose a supported scan profile." },
+        { status: 400 },
       );
-    }
-
-    const sanitizedUrl = sanitizeUrl(url);
-    if (!sanitizedUrl) {
+    const targetUrl = sanitizeUrl(url.trim());
+    if (!targetUrl)
       return NextResponse.json(
-        { error: "Invalid URL. Only HTTP/HTTPS URLs to public hosts are allowed." },
-        { status: 400 }
+        {
+          error:
+            "Use an HTTP or HTTPS URL with a public hostname and no embedded credentials.",
+        },
+        { status: 400 },
       );
-    }
-
-    // Simulate scan — generate findings
-    const findings = generateScanFindings(sanitizedUrl);
+    const findings = generateScanFindings(targetUrl, scanType);
     const riskScore = calculateRiskScore(findings);
-
-    // Save to database
+    const now = new Date().toISOString();
+    if (access.demo)
+      return NextResponse.json({
+        id: crypto.randomUUID(),
+        targetUrl,
+        scanType,
+        status: "completed",
+        riskScore,
+        findings,
+        startedAt: now,
+        completedAt: now,
+        simulated: true,
+      });
     const scan = await prisma.scanResult.create({
       data: {
-        targetUrl: sanitizedUrl,
+        targetUrl,
         scanType,
         status: "completed",
         riskScore,
         findings: JSON.stringify(findings),
         completedAt: new Date(),
-        userId,
+        userId: access.id,
       },
     });
-
-    return NextResponse.json({
-      id: scan.id,
-      targetUrl: scan.targetUrl,
-      scanType: scan.scanType,
-      status: scan.status,
-      riskScore: scan.riskScore,
-      findings,
-      startedAt: scan.startedAt,
-      completedAt: scan.completedAt,
-    });
+    return NextResponse.json({ ...scan, findings, simulated: true });
   } catch (error) {
     console.error("Scan error:", error);
     return NextResponse.json(
-      { error: "Failed to execute scan" },
-      { status: 500 }
+      {
+        error:
+          "Unable to save the scan. Check your database connection and try again.",
+      },
+      { status: 500 },
     );
   }
 }
-
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const access = await getAccess();
+    if (!access)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = (session.user as { id?: string }).id || "unknown";
-
+    if (access.demo) return NextResponse.json(createDemoWorkspace().scans);
     const scans = await prisma.scanResult.findMany({
-      where: { userId },
+      where: { userId: access.id },
       orderBy: { startedAt: "desc" },
-      take: 20,
+      take: 50,
     });
-
     return NextResponse.json(
-      scans.map((scan) => ({
-        ...scan,
-        findings: JSON.parse(scan.findings),
-      }))
+      scans.map((scan) => ({ ...scan, findings: JSON.parse(scan.findings) })),
     );
-  } catch (error) {
-    console.error("Error fetching scans:", error);
+  } catch {
     return NextResponse.json(
-      { error: "Failed to fetch scan history" },
-      { status: 500 }
+      { error: "Unable to load scan history. Check your database connection." },
+      { status: 500 },
     );
   }
 }

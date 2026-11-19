@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test scripts/core.test.mjs",
+    "test:browser": "node scripts/verify-browser.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {
